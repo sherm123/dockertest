@@ -1,0 +1,267 @@
+
+
+Docker Cookbook : https://github.com/how2dock/docbook
+--------------------------------------------------------
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Chapter 1 : Getting started with Docker
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+$ docker : returns help commands
+
+$ docker ps : view all currently running containers
+$ docker ps -a : view containers in staging area (not currently running)
+$ docker images : to list all images in local repository that have been downloaded
+
+$ docker rm container_id : to remove a container (from $ docker ps -a list)
+$ docker rmi image_id : to remove an image from local repository (from $ docker images list .. if still in use by container it will not delete.. remove those containers first)
+
+$ docker run -ti ubuntu:14.04 /bin/bash : to get a terminal session within a container on startup
+$ docker run -d -p 1234:1234 python:2.7 puthon -m SimpleHTTPServer 1234  
+			: runs a container in the background (detached mode) by using -d as a parameter
+			: you can connected to container running in the background by running bash shell eg:   $ docker exec -ti container_id /bin/bash
+$ docker exec -ti container_id /bin/bash : to open a terminal for a currently running container
+
+$ docker create -P --expose=1234 python:2.7 python -m SimpleHTTPServer 1234 : create a container and add to the container staging area ($ docker ps -a to list)
+$ docker start container_id : start a container that is in the staging area
+$ docker restart container_id : to restart a running container
+$ docker stop container_id : to stop the container gracefully (best to use stop instaed of $ docker kill container_id)
+
+Commands to run effect multiple containers
+-----------------------------------------------------------------------------------------
+$ docker stop $(docker ps -q) : stop all currently running containers
+$ docker rm $(docker ps -aq) : to remove a lot of stopped containers in one command
+$ docker rm -v $(docker ps -aq) : to remove stopped containers and associated volumes
+$ docker rmi $(docker images) : to remove a lot of images in one command
+
+
+
+Dockerfile (to create a docker image from a file)
+-------------------------------------------------------------
+: 	1. create Dockerfile with contents:    	FROM busybox
+						ENV foo=bar
+  	2. run command $ docker build -t busybox2 .
+	3. $ docker run busybox2 env |grep foo
+
+Linking 2 containers (to link 2 containers for communication between each)
+---------------------------------------------------------------------------
+: 	1. $ docker pull wordpress:latest		($ docker pull command retrieves docker image from repository)
+	2. $ docker pull mysql:latest
+	3. $ docker images
+	4. $ docker run --name mysqlwp -e MYSQL_ROOT_PASSWORD=wordpressdocker -d mysql
+	5. $ docker run --name wordpress --link mysqlwp:mysql -p 80:80 -d wordpress
+	6. $ docker ps
+
+To backup data in a container (eg. a container with mysql database), use a detached volume
+--------------------------------------------------------------------------------------------
+:	1. $ docker run --name mysqlwp -e MYSQL_ROOT_PASSWORD=wordpressdocker 
+				       -e MYSQL_DATABASE=wordpress 
+ 				       -e MYSQL_USER=wordpress 
+				       -e MYSQL_PASSWORD=wordpresswd 
+				       -v /home/docker/mysql:/var/lib/mysql	(mount volume host directory/container directory)
+				       -d mysql
+
+	2. $ docker exec mysqlwp mysqldump --all-databases --password=wordpressdocker > wordpress.backup  (runs mysqldump backup command on running container instance)
+
+Mount host folder to container
+-----------------------------------------------------------------------------------------
+: 	1. $ docker run -ti -v "$PWD":/cookbook ubuntu:14.04 /bin/bash  (mounts current host working directory to container "cookbook" directory)
+	2. $ ls cookbook
+	3. lists shows host directory files inside container
+
+: by default, docker mounts volumes as read/write, to mount as read-only use ":ro"
+		eg:  -v "$PWD"/cookbook:ro
+
+$ docker inspect -f {{.Mounts}} container_id   (to view current container volume mount mappings from host to container)
+
+
+Mount container folder (volume/data containers) to another container
+-----------------------------------------------------------------------------------------
+: 	1. $ docker run -v /data --name data ubuntu:14.04     (host path has been omitted, so a data container is created)
+	2. $ docker ps
+	3. $ docker inspect -f {{.Mounts}} data				(inspect container volume mounts on new container named "data" (created in step 1))
+	4. $ docker run -it --volumes-from data ubuntu:14.04 /bin/bash	(use --volumes-from container_name to mount volume)
+	5. $ touch /data/foobar
+	6. $ exit
+	7. $ sudo ls /var/lib/docker/volumes/4eej0jfj9djs....
+
+
+Copying files to and from containers
+-----------------------------------------------------------------------------------------
+:	1. $ docker cp 		(use docker cp command to copy files from a running container to/from the Docker host)
+	2. $ docker run -d --name testcopy ubuntu:14.04 sleep 360
+	3. $ docker exec -ti testcopy /bin/bash
+	4. $ cd /root
+	5. $ echo "i am in the container" > container.txt
+	6. $ exit
+	7. $ docker cp testcopy:/root/container.txt .
+	8. $ cat container.txt
+	output : i am in the container
+
+	1. $ echo "I am in the host" > host.txt
+	2. docker cp host.txt testcopy:/root/host.txt
+	3. $ docker exec -ti testcopy /bin/bash
+	4. $ cd root
+	5. $ ls
+
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Chapter 2 : Image creation and sharing
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+To create an image from a modified container
+-----------------------------------------------------------------------------------------
+:	1. $ docker run -ti ubuntu:14.04 /bin/bash
+	2. $ apt-get update
+	3. exit
+	4. docker commit container_id new_image_name_here:new_tag_id_here
+	5. docker diff							(to inspect the changes that have been made inside the container)
+										C = change made, A = file/dir added, D=deleted
+
+To save images and containers as Tar files for sharing and to import them
+-----------------------------------------------------------------------------------------
+:	1. $ docker export container_id > update.tar
+	2. $ docker import - new_image_name < update.tar
+
+	1. $ docker save -o update1.tar image_repository_here   (eg. image_repository_here = update)
+	2. $ docker rmi update
+	3. $ docker load < update1.tar
+	4. $ docker images
+
+
+
+Writing you first Dockerfile (creating a Docker image from a file)
+-----------------------------------------------------------------------------------------
+:	1. create a Dockerfile with the following contents:
+								FROM ubuntu:14.04
+								ENTRYPOINT ["/bin/echo"]		(ENTRYPOINT can be overridden by using --entrypoint option of docker run)
+	2. $ docker build -t cookbook:hello .								(repository=cookbook, tag=hello)
+	3. $ docker images
+	4. $ docker run image_id "This is an echo message"
+	5. output : "This is an echo message"
+
+:	1. create a Dockerfile with the folling contents:
+								FROM ubuntu:14.04
+								CMD ["/bin/echo", "Hi Docker"]		(CMD executes a default command on container startup, can override with parameter)
+	2. $ docker build -t cookbook:helloCMD .
+	3. $ docker images
+	4. $ docker run image_id /bin/date 			(this will override "Hi Docker")
+	5. output : Thu Dec 11 02:20:10 UTC 2018
+
+
+:	1. $ create a Dockerfile with the folling contents:
+								FROM ubuntu:14.04
+
+								RUN apt-get update			(Run commands on image at creation time)
+								RUN apt-get install -y python
+								RUN apt-get install -y python-pip
+								RUN apt-get clean all
+								RUN pip install flask
+
+								ADD hello.py /tmp/hello.py		(add a shell script to the container)
+
+								EXPOSE 5000				(Expose port 5000 in the container)
+
+								CMD ["python", "/tmp/hello.py"]
+
+	2. $ docker build -t flask .				(create a new image from a build Dockerfile)
+	3. $ docker images
+	4. $ docker run -d -P flask				(-d = run new image in background, -P = map a random port on host to port 5000 on container)
+
+
+
+Optimising your Dockerfile by following best practices
+-----------------------------------------------------------------------------------------
+:	Run a single process per container - this helps decouple applications that can scale.
+: 	Treat containers as immutable entities - do not modify containers but instead restart them from your base image.
+:	Manage runtime configuration and data outside the containers and hence the image. Use Docker volumes for this.
+: 	Use a '.dockerignore' file to exclude files and directories from being copies over during the build process of the image.
+:	Use official Docker Hub images instead of writing your own
+:	Take advantage of the image cache and minimise the number of layers your images.
+
+
+:	Do NOT use multiple RUN commands in the Docker file as each RUN command creates a new unnecessary layer (BAD PRACTICE).
+		eg: 
+			FROM ubuntu:14.04
+			RUN apt-get update && apt-get install -y \
+			    python
+			    python-pip
+			RUN pip install flask
+
+			COPY hello.py /tmp/hello.py
+			...
+
+Versioning an Image with Tags
+----------------------------------------------------------------------------------------
+:	$ docker images
+	$ docker tag current_repository:current_tag new_tag  	(Tag an image with the docker tag command to keep track of an image version)
+		eg:
+			$ docker tag ubuntu:14.04 new_repository_name:new_tag_name_here
+
+:	A tag is optional; if you do not specify a tag, Docker will try to use a tag called 'latest'.
+
+
+Using Packer to Create a Docker Image
+-------------------------------------------------------------
+FURTHER READING:: Section 2.8
+
+
+Publishing your Image to Docker Hub
+------------------------------------------------------------------------------------------
+:	Create a Docker Hub account
+:	$ docker login			(logs into new Docker Hub account)
+	  Username: sherm273	
+	  Password: abc12345678
+	$ docker images
+	$ docker tag ubuntu:14.04 sherm273/ubuntu
+	$ docker push sherm273/ubuntu
+
+:	$ docker search ubuntu		(to search for an image on Docker Hub)
+
+Using ONBUILD images
+------------------------------------------------------------------------------------------
+:	Dockerfile parent containing:
+		FROM node:0.12.6
+
+		RUN mkdir -p /usr/src/app
+		WORKDIR /usr/src/app
+
+		ONBUILD COPY package.json /usr/src/app/
+		ONBUILD RUN npm install
+		ONBUILD COPY . /usr/src/app
+
+		CMD[ "npm", "start" ]
+
+	CHILD Dockerfile would use "onbuild" to call parent Dockerfile above (parent is executed first then child)
+		eg:
+			FROM node:0.12.6-onbuild 		(onbuild calls parent Dockerfile which in this example copies package.json, executes npm install and copies the entire
+								 context to /usr/src/app)
+
+Running a Private Repository
+------------------------------------------------------------------------------------------
+:	Use the Docker registry image and start a container from it then you will have your own private Docker repository.
+
+	$ docker pull registry:2
+	$ docker run -d -p 5000:5000 registry:2
+	$ curl -i http://localhost:5000/v2
+	$ docker tag ubuntu:14.04 localhost:5000/ubuntu		(standard to prefix repository eg localhost:5000 or sherm273 (Docker hub username)
+	$ docker push localhost:5000/ubuntu
+
+	SEE Docker registry documentation for further details
+
+
+Setting up and automated build on Docker Hub for continuous integration/deployment
+-----------------------------------------------------------------------------------------
+Section 2.12	PG 82
+
+Setting up a local automated build by using a Git hook and a private repository
+-----------------------------------------------------------------------------------------
+Section 2.13	PG 86
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Chapter 3 : Docker Networking
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+PG 89
+	
